@@ -21,15 +21,16 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
+var T int = 5
+var stateMutex = sync.Mutex{} // Sezione critica per i cambi di stato
 var mapMutex = sync.Mutex{}
 
-var timer int = 20 // Timer per l'invocazione periodica della funzione Check()
-var timer_leader int = 4 // Timer dopo il quale un processo si rende conto che il proprio leader non c'è più
-var T_readyMessage int = 3 // Timer per i secondi di attesa di risposte dei messaggi
-var T_areYouThereRequestMessage int = 3 // Timer per i secondi di attesa di risposte dei messaggi
-var T_areYouCoordinatorRequestMessage int = 3 // Timer per i secondi di attesa di risposte dei messaggi
-var T_acceptMessage int = 3 // Timer per i secondi di attesa di risposte dei messaggi
-
+var timer int = 3 // Timer per l'invocazione periodica della funzione Check()
+var timer_leader int = len(machines)*T + len(Up)*T // Timer dopo il quale un processo si rende conto che il proprio leader non c'è più
+var T_readyMessage int = T // Timer per i secondi di attesa di risposte dei messaggi
+var T_areYouThereMessage int = T // Timer per i secondi di attesa di risposte dei messaggi
+var T_areYouCoordinatorMessage int = T // Timer per i secondi di attesa di risposte dei messaggi
+var T_acceptMessage int = T // Timer per i secondi di attesa di risposte dei messaggi
 
 var my_address string = "127.0.0.1:8000" // Numero identificativo del processo
 var machines []string  // Indirizzi di tutti i processi
@@ -48,7 +49,7 @@ func initialization() {
 	counter = 0
 	g = hash(my_address)
 	Up = make(map[string]bool)
-	Up[my_address] = true
+	//Up[my_address] = true
 }
 
 // Funzione di utilità per convertire stringhe a interi univoci
@@ -59,6 +60,7 @@ func hash(s string) int {
 }
 
 // Funzione ausiliaria che dato un "insieme" (mappa in cui le chiavi sono stringhe) restituisce la chiave maggiore
+/*
 func maxStringInMap(set map[string]bool) string {
 	strings := []string{} // array di stringhe
 	for key,_ := range set {
@@ -72,21 +74,47 @@ func maxStringInMap(set map[string]bool) string {
 		}
 	}
 	return max
+}*/
+
+func maxAddressNum(set map[string]bool) int {
+	strings := []string{} // array di stringhe
+	for key,_ := range set {
+		strings = append(strings, key)
+	}
+	// Da adesso l'array di stringhe
+
+	numbers := []int{} // array di stringhe
+	for _, value := range strings {
+		numbers = append(numbers, hash(value))
+	}
+
+	max := numbers[0]
+	for _, value := range numbers {
+		if value > max {
+			max = value
+		}
+	}
+
+	return max
+
 }
 
 // Funzione ausiliaria che invoca la procedura Check() ogni 5 secondi
 func invocatorCheck() {
 	for {
+		Check()
+		/*
 		for timer > 0 {
 			timer = timer - 1
 			time.Sleep(1 * time.Second) // Aspetta un secondo
 			fmt.Println("Il mio leader è ", c)
 		}
 		if timer == 0 {
-			s = "Normal" // TODO: ultima invenzione
-			timer = 20
-			go Check()
+			//s = "Normal" // TODO: ultima invenzione
+			timer = 3
+			Check()
 		}
+		*/
 	}
 }
 
@@ -96,12 +124,13 @@ func invocatorTimeout() {
 	for {
 		if my_address != c { // se non sono un leader
 			for timer_leader > 0 {
+				fmt.Println("Quando arriva a 0 invocherò Timeout: ", timer_leader)
 				timer_leader = timer_leader - 1
 				time.Sleep(1 * time.Second) // Aspetta un secondo
 			}
 			if timer_leader == 0 {
-				timer_leader = 4
-				go Timeout()
+				timer_leader = len(machines)*T + len(Up)*T
+				Timeout()
 			}
 		}
 	}
@@ -123,6 +152,8 @@ func main() {
 		
 	fmt.Println("Starting machine", my_address)
 
+	timer_leader = len(machines)*T + len(Up)*T
+
 	go invocatorCheck() // Goroutine che periodicamente invoca la funzione principale Check()
 
 	go invocatorTimeout() // Goroutine che controlla il timer_leader e invoca Timeout() se questo è uguale a 0
@@ -135,9 +166,9 @@ func main() {
 
 	http.HandleFunc("/InvitationMessage", handleInvitationMessage)
 
-	http.HandleFunc("/AreYouThereRequestMessage", handleAreYouThereRequestMessage)
+	http.HandleFunc("/AreYouThereMessage", handleAreYouThereMessage)
 
-	http.HandleFunc("/AreYouCoordinatorRequestMessage", handleAreYouCoordinatorRequestMessage)
+	http.HandleFunc("/AreYouCoordinatorMessage", handleAreYouCoordinatorMessage)
 
 	http.HandleFunc("/ReadyMessage", handleReadyMessage)
 
@@ -172,18 +203,18 @@ type InvitationMessage struct {
 }
 var mapInvitationMessage map[string]bool = make(map[string]bool)
 
-type AreYouThereRequestMessage struct {
+type AreYouThereMessage struct {
 	Sender string `json:"sender"`
 	Gn int `json:"gn"`
 }
-var mapAreYouThereRequestMessage map[string]bool = make(map[string]bool) // Nota: in questo caso viene portata anche una risposta
-var mapAreYouThereRequestMessage2 map[string]string = make(map[string]string)
+var mapAreYouThereMessage map[string]bool = make(map[string]bool) // Nota: in questo caso viene portata anche una risposta
+var mapAreYouThereMessage2 map[string]string = make(map[string]string)
 
-type AreYouCoordinatorRequestMessage struct {
+type AreYouCoordinatorMessage struct {
 	Sender string `json:"sender"`
 }
-var mapAreYouCoordinatorRequestMessage map[string]bool = make(map[string]bool) // Nota: in questo caso viene portata anche una risposta
-var mapAreYouCoordinatorRequestMessage2 map[string]string = make(map[string]string)
+var mapAreYouCoordinatorMessage map[string]bool = make(map[string]bool) // Nota: in questo caso viene portata anche una risposta
+var mapAreYouCoordinatorMessage2 map[string]string = make(map[string]string)
 
 type ReadyMessage struct {
 	Sender string `json:"sender"`
@@ -205,6 +236,7 @@ var mapReadyMessage map[string]bool = make(map[string]bool)
 // Il processo P_i si riprende dopo un fallimento, o dopo che altre cose sono andate storte!
 // TODO: invocarla dopo un ripristino del nodo
 func Recovery() {
+	stateMutex.Lock()
 	fmt.Println("Io,", my_address, "faccio recovery")
 	s = "Election"
 	// TODO: capire cosa significa "Call stop"
@@ -215,6 +247,7 @@ func Recovery() {
 	Up = make(map[string]bool)
 	mapMutex.Unlock()
 	s = "Normal"
+	stateMutex.Unlock()
 }
 
 // Funzione che mira a formare un nuovo gruppo in cui P_i è il coordinatore, avente dentro tutti i membri del gruppo
@@ -223,16 +256,17 @@ func Merge(CoordinatorSet map[string]bool) {
 	
 	fmt.Println("Io, processo ", my_address, "chiamo merge")
 	
+	stateMutex.Lock()
 	s = "Election"
-	// TODO: capire cosa vuol dire Call stop
 	counter = counter + 1 // visto che sto formando un altro gruppo, aumento il counter
 	g = hash(my_address) + counter // Nuovo identificativo del gruppo. TODO: capire se è la cosa giusta da fare per creare gruppi univoci
 	c = my_address // mi eleggo leader
 	TempSet := Up
 	mapMutex.Lock()
 	Up = make(map[string]bool) // Setto il mio gruppo attuale a "gruppo vuoto"
-	Up[my_address] = true // mi metto io dentro Up
+	//Up[my_address] = true // mi metto io dentro Up
 	mapMutex.Unlock()
+	stateMutex.Unlock()
 	
 	for j,_ := range CoordinatorSet { // Per ogni coordinatore dell'insieme CoordinatorSet
 		jsonData := InvitationMessage{
@@ -254,7 +288,9 @@ func Merge(CoordinatorSet map[string]bool) {
 		Up[j] = true
 		mapMutex.Unlock()
 	}
+	stateMutex.Lock()
 	s = "Reorganization"
+	stateMutex.Unlock()
 	for j,_ := range Up {
 		jsonData := ReadyMessage{
 			Sender: my_address,
@@ -267,45 +303,51 @@ func Merge(CoordinatorSet map[string]bool) {
 			time.Sleep(1 * time.Second) // Aspetta un secondo
 		}
 		if T_readyMessage == 0 && mapReadyMessage[j] == false { // Caso "sfortunato" del timer scaduto
-			T_readyMessage = 3
+			T_readyMessage = 5
 			fmt.Println("Faccio recovery perchè sono Merge!")
 			Recovery()
 		} else {
-			T_readyMessage = 3
+			T_readyMessage = 5
 			mapMutex.Lock()
 			mapReadyMessage[j] = false
 			mapMutex.Unlock()
 		}
 	}
+	stateMutex.Lock()
+	s = "Normal"
+	stateMutex.Unlock()
 }
 
 // Funzione chiamata quando non sento il mio leader per un po' di tempo...
 func Timeout() {
+	fmt.Println("Faccio TIMEOUT!!!")
+	stateMutex.Lock()
 	MyCoord := c
 	MyGroup := g
+	stateMutex.Unlock()
 	if MyCoord != my_address {
-		jsonData := AreYouThereRequestMessage{
+		jsonData := AreYouThereMessage{
 			Sender: my_address,
 			Gn: MyGroup}
 		jsonValue, _ := json.Marshal(jsonData)
-		go http.Post("http://"+MyCoord+"/AreYouThereRequestMessage", "application/json", bytes.NewBuffer(jsonValue))
+		go http.Post("http://"+MyCoord+"/AreYouThereMessage", "application/json", bytes.NewBuffer(jsonValue))
 
-		for T_areYouThereRequestMessage > 0 && mapAreYouThereRequestMessage[MyCoord] == false {
-			T_areYouThereRequestMessage = T_areYouThereRequestMessage - 1
+		for T_areYouThereMessage > 0 && mapAreYouThereMessage[MyCoord] == false {
+			T_areYouThereMessage = T_areYouThereMessage - 1
 			time.Sleep(1 * time.Second) // Aspetta un secondo
 		}
-		if T_areYouThereRequestMessage == 0 && mapAreYouThereRequestMessage[MyCoord] == false { // Caso "sfortunato" del timer scaduto
-			T_areYouThereRequestMessage = 3
+		if T_areYouThereMessage == 0 && mapAreYouThereMessage[MyCoord] == false { // Caso "sfortunato" del timer scaduto
+			T_areYouThereMessage = 5
 			fmt.Println("Invoco il recovery perchè sono Timeout!")
 			Recovery()
 		} else { // Caso risposta arrivata
-			T_areYouThereRequestMessage = 3
+			T_areYouThereMessage = 5
 			mapMutex.Lock()
-			mapAreYouThereRequestMessage[MyCoord] = false
+			mapAreYouThereMessage[MyCoord] = false
 			mapMutex.Unlock()
-			if mapAreYouThereRequestMessage2[MyCoord] == "No" {
+			if mapAreYouThereMessage2[MyCoord] == "No" {
 				mapMutex.Lock()
-				mapAreYouThereRequestMessage2[MyCoord] = ""
+				mapAreYouThereMessage2[MyCoord] = ""
 				mapMutex.Unlock()
 				fmt.Println("Invoco il recovery perchè sono Timeout 2!")
 				Recovery()
@@ -317,45 +359,49 @@ func Timeout() {
 // FUNZIONE PRINCIPALE: la procedura è chiamata periodicamente con un "qualche timer"
 func Check() {
 	if s == "Normal" && c == my_address {
-		fmt.Println("Invoco sta check!")
-		leaderToGroup()
+		fmt.Println("Il mio leader è ", c)
+		fmt.Println("Invoco la check!")
+		leaderToGroup() // Invio di notifica del lavoro del leader
 		TempSet := make(map[string]bool) // TempSet è l'insieme dei leader attuali
 		for _,j := range machines { // Per ogni processo, tranne P_i
 			if j != my_address {
-				jsonData := AreYouCoordinatorRequestMessage{
+				jsonData := AreYouCoordinatorMessage{
 					Sender: my_address}
 				jsonValue, _ := json.Marshal(jsonData)
-				go http.Post("http://"+j+"/AreYouCoordinatorRequestMessage", "application/json", bytes.NewBuffer(jsonValue))
+				go http.Post("http://"+j+"/AreYouCoordinatorMessage", "application/json", bytes.NewBuffer(jsonValue))
 			
-				for T_areYouCoordinatorRequestMessage > 0 && mapAreYouCoordinatorRequestMessage[j] == false {
-					T_areYouCoordinatorRequestMessage = T_areYouCoordinatorRequestMessage - 1
+				for T_areYouCoordinatorMessage > 0 && mapAreYouCoordinatorMessage[j] == false {
+					T_areYouCoordinatorMessage = T_areYouCoordinatorMessage - 1
 					time.Sleep(1 * time.Second) // Aspetta un secondo
 				}
-				if T_areYouCoordinatorRequestMessage == 0 && mapAreYouCoordinatorRequestMessage[j] == false { // Caso "sfortunato" del timer scaduto
-					T_areYouCoordinatorRequestMessage = 3
+				if T_areYouCoordinatorMessage == 0 && mapAreYouCoordinatorMessage[j] == false { // Caso "sfortunato" del timer scaduto
+					T_areYouCoordinatorMessage = 5
 					continue // Salta alla successiva iterazione del ciclo
 				} else { // Caso risposta arrivata
-					T_areYouCoordinatorRequestMessage = 3
+					T_areYouCoordinatorMessage = 5
 					mapMutex.Lock()
-					mapAreYouCoordinatorRequestMessage[j] = false
+					mapAreYouCoordinatorMessage[j] = false
 					mapMutex.Unlock()
-					if mapAreYouCoordinatorRequestMessage2[j] == "Yes" {
+					if mapAreYouCoordinatorMessage2[j] == "Yes" {
 						mapMutex.Lock()
 						TempSet[j] = true // Aggiungi P_j all'insieme
-						mapAreYouCoordinatorRequestMessage2[j] = ""
+						mapAreYouCoordinatorMessage2[j] = ""
 						mapMutex.Unlock()
 					}
 				}
 			}
 		}
 		if len(TempSet) != 0 { // Se l'insieme TempSet è diverso dall'insieme vuoto
-			p := maxStringInMap(TempSet)
-			if my_address < p {
-				seconds := int(math.Log10(float64(hash(p) - hash(my_address))))
+			p := maxAddressNum(TempSet)
+			if hash(my_address) < p {
+				fmt.Println(hash(my_address))
+				seconds := int(math.Log10(float64(p - hash(my_address))))
 				invocaMerge(TempSet, seconds)
-				
 			}
 		}
+	} else {
+		time.Sleep(1 * time.Second)
+		fmt.Println("Il mio leader è ", c)
 	}
 }
 
@@ -396,16 +442,16 @@ func handleAcknowledgmentMessage(w http.ResponseWriter, r *http.Request) {
 			mapInvitationMessage[data.Sender] = true
 			mapMutex.Unlock()
 		}
-		case "AreYouThereRequestMessage": {
+		case "AreYouThereMessage": {
 			mapMutex.Lock()
-			mapAreYouThereRequestMessage[data.Sender] = true
-			mapAreYouThereRequestMessage2[data.Sender] = data.Ans
+			mapAreYouThereMessage[data.Sender] = true
+			mapAreYouThereMessage2[data.Sender] = data.Ans
 			mapMutex.Unlock()
 		}
-		case "AreYouCoordinatorRequestMessage": {
+		case "AreYouCoordinatorMessage": {
 			mapMutex.Lock()
-			mapAreYouCoordinatorRequestMessage[data.Sender] = true
-			mapAreYouCoordinatorRequestMessage2[data.Sender] = data.Ans
+			mapAreYouCoordinatorMessage[data.Sender] = true
+			mapAreYouCoordinatorMessage2[data.Sender] = data.Ans
 			mapMutex.Unlock()
 		}
 		case "ReadyMessage": {
@@ -424,7 +470,7 @@ func handleImYourLeaderMessage(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewDecoder(r.Body).Decode(&data)
 
 	if data.Sender == c {
-		timer_leader = 4
+		timer_leader = len(machines)*T + len(Up)*T
 	}
 }
 
@@ -444,16 +490,19 @@ func handleAcceptMessage(w http.ResponseWriter, r *http.Request) {
 	jsonValue, _ := json.Marshal(jsonData)
 	go http.Post("http://"+data.Sender+"/AcknowledgmentMessage", "application/json", bytes.NewBuffer(jsonValue))
 
+	stateMutex.Lock()
 	if s == "Election" && g == data.Gn && c == my_address {
 		j := data.Sender
 		mapMutex.Lock()
 		Up[j] = true
 		mapMutex.Unlock()
 	}
+	stateMutex.Unlock()
 }
 
 // Evento INVITATION: vengo invitato da un processo P_j a entrare nel gruppo Gn
 func handleInvitationMessage(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("A me ", my_address, " è arrivato un InvitationMessage")
 	var Temp string
 	var TempSet map[string]bool
 	
@@ -468,6 +517,7 @@ func handleInvitationMessage(w http.ResponseWriter, r *http.Request) {
 	jsonValue, _ := json.Marshal(jsonData)
 	go http.Post("http://"+data.Sender+"/AcknowledgmentMessage", "application/json", bytes.NewBuffer(jsonValue))
 
+	stateMutex.Lock()
 	if s == "Normal" { // Posso accettare l'invito solo se sono nello stato "Normal"
 		// TODO: capire cosa significa "Call stop"
 		Temp = c // Temp è il leader attuale di P_i
@@ -476,6 +526,8 @@ func handleInvitationMessage(w http.ResponseWriter, r *http.Request) {
 		c = data.Sender // Il nuovo coordinatore di P_i è il nodo P_j
 		g = data.Gn // Il nuovo gruppo di P_i è il nodo P_j
 	}
+	stateMutex.Unlock()
+	
 	if Temp == my_address { // Se io (P_i) ero il leader, invito in Gn i membri del mio gruppo
 		for address,_ := range TempSet { // Per ogni processo dentro Up
 			
@@ -494,79 +546,86 @@ func handleInvitationMessage(w http.ResponseWriter, r *http.Request) {
 	jsonValue, _ = json.Marshal(jsonData2)
 	go http.Post("http://"+data.Sender+"/AcceptMessage", "application/json", bytes.NewBuffer(jsonValue))
 
+	/*
 	for T_acceptMessage > 0 && mapAcceptMessage[data.Sender] == false {
 		T_acceptMessage = T_acceptMessage - 1
 		time.Sleep(1 * time.Second) // Aspetta un secondo
 	}
 	if T_acceptMessage == 0 && mapAcceptMessage[data.Sender] == false { // Caso "sfortunato" del timer scaduto
-		T_acceptMessage = 3
-		//fmt.Println("Faccio recovery perchè sono handleInvitationMessage")
-		//Recovery()
+		T_acceptMessage = 5
+		fmt.Println("Faccio recovery perchè sono handleInvitationMessage")
+		Recovery()
 	} else {
-		T_acceptMessage = 3
+		T_acceptMessage = 5
 		mapMutex.Lock()
 		mapAcceptMessage[data.Sender] = false
 		mapMutex.Unlock()
 	}
+	*/
 	mapMutex.Lock()
 	mapAcceptMessage = make(map[string]bool) // Resettato per il futuro
 	mapMutex.Unlock()
 
+	stateMutex.Lock()
 	s = "Reorganization" // TODO: questo dovrebbe essere s = "Reorganization"
+	stateMutex.Unlock()
 }
 
 // Evento AREYOUTHERE: chi spedisce questo messaggio a P_i desidera sapere se P_i è coordinatore
 // del gruppo Gn e se considera P_j (mittente del messaggio) come membro di quel gruppo
-func handleAreYouThereRequestMessage(w http.ResponseWriter, r *http.Request) {
+func handleAreYouThereMessage(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
-	var data AreYouThereRequestMessage
+	var data AreYouThereMessage
 	_ = json.NewDecoder(r.Body).Decode(&data)
 	
 	// In questo caso l'Acknowledgment porta con sé qualcosa di aggiuntivo (Ans)
 
+	stateMutex.Lock()
 	if g == data.Gn && c == my_address && Up[data.Sender] == true {
 		jsonData := Acknowledgment{
-			Typemessage: "AreYouThereRequestMessage",
+			Typemessage: "AreYouThereMessage",
 			Sender: my_address,
 			Ans: "Yes" }
 		jsonValue, _ := json.Marshal(jsonData)
 		go http.Post("http://"+data.Sender+"/AcknowledgmentMessage", "application/json", bytes.NewBuffer(jsonValue))
 	} else {
 		jsonData := Acknowledgment{
-			Typemessage: "AreYouThereRequestMessage",
+			Typemessage: "AreYouThereMessage",
 			Sender: my_address,
 			Ans: "No" }
 		jsonValue, _ := json.Marshal(jsonData)
 		go http.Post("http://"+data.Sender+"/AcknowledgmentMessage", "application/json", bytes.NewBuffer(jsonValue))
 	}
+	stateMutex.Unlock()
 }
 
 // Evento AREYOUCOORDINATOR: Il nodo mittente vuole sapere se P_i è un coordinatore nello stato "Normal". P_i Può quindi
 // rispondere SI oppure NO
-func handleAreYouCoordinatorRequestMessage(w http.ResponseWriter, r *http.Request) {
+func handleAreYouCoordinatorMessage(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
-	var data AreYouCoordinatorRequestMessage
+	var data AreYouCoordinatorMessage
 	_ = json.NewDecoder(r.Body).Decode(&data)
 
 	// In questo caso l'Acknowledgment porta con sé qualcosa di aggiuntivo (Ans)
-
+	stateMutex.Lock()
 	if s == "Normal" && c == my_address {
 		jsonData := Acknowledgment{
-			Typemessage: "AreYouCoordinatorRequestMessage",
+			Typemessage: "AreYouCoordinatorMessage",
 			Sender: my_address,
 			Ans: "Yes" }
 		jsonValue, _ := json.Marshal(jsonData)
 		go http.Post("http://"+data.Sender+"/AcknowledgmentMessage", "application/json", bytes.NewBuffer(jsonValue))
 	} else {
 		jsonData := Acknowledgment{
-			Typemessage: "AreYouCoordinatorRequestMessage",
+			Typemessage: "AreYouCoordinatorMessage",
 			Sender: my_address,
 			Ans: "No" }
 		jsonValue, _ := json.Marshal(jsonData)
 		go http.Post("http://"+data.Sender+"/AcknowledgmentMessage", "application/json", bytes.NewBuffer(jsonValue))
 	}
+	stateMutex.Unlock()
 
 }
 
@@ -585,11 +644,14 @@ func handleReadyMessage(w http.ResponseWriter, r *http.Request) {
 	jsonValue, _ := json.Marshal(jsonData)
 	go http.Post("http://"+data.Sender+"/AcknowledgmentMessage", "application/json", bytes.NewBuffer(jsonValue))
 
-	if s == "Reorganization" && g == data.Gn {
+	stateMutex.Lock()
+	if s == "Reorganization"  && g == data.Gn {
 		s = "Normal"
+		fmt.Println("Finalmente eseguo PAXOS")
 		// TODO: nello peudocodice questa funzione prende dei "dati": significa che da questo momento in poi
 		// finisce la leader election? Importante per i lock quando si dovrà fondere con Paxos
 	}
+	stateMutex.Unlock()
 }
 
 
